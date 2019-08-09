@@ -1,15 +1,20 @@
 from pprint import pprint
 
+import xlwt
+from xlutils.copy import copy
 from xlrd import open_workbook
 from xlrd.sheet import XL_CELL_NUMBER
-from xlwt import Workbook
+from xlutils.styles import Styles
+
 import logging
 
 
 class XlsFileReader:
 
-    def __init__(self, filename):
-        self._filename = filename
+    def __init__(self, input_filename='../data.xls', output_filename='../data.xls'):
+        self._input_filename = input_filename
+        self._output_filename = output_filename
+        self._styles = None
 
     def _numsym(self, number):
         alphabet = "ABCDEFGHIJKLMNOP"
@@ -22,7 +27,8 @@ class XlsFileReader:
     def read_file(self):
         result = {}
         try:
-            self._rb = open_workbook(filename=self._filename, formatting_info=True)
+            self._rb = open_workbook(filename=self._input_filename, formatting_info=True)
+            self._styles = Styles(self._rb)
         except Exception as e:
             logging.error(e)
 
@@ -40,16 +46,35 @@ class XlsFileReader:
             logging.error('Empty file.')
         return result
 
+    def _get_style(self, column):
+        style = xlwt.XFStyle()
+        pattern = xlwt.Pattern()
+        pattern.pattern = xlwt.Pattern.SOLID_PATTERN
+        if column in 'BCD':
+            pattern.pattern_fore_colour = xlwt.Style.colour_map['yellow']
+        else:
+            pattern.pattern_fore_colour = xlwt.Style.colour_map['turquoise']
+
+        borders = xlwt.Borders()
+        borders.left = 1
+        borders.right = 1
+        borders.top = 1
+        borders.bottom = 1
+        style.pattern = pattern
+        style.borders = borders
+        return style
+
     def write_file(self, data):
-        wb = Workbook()
-        ws = wb.add_sheet('A Test Sheet')
+        self._wb = copy(self._rb)
+        ws = self._wb.get_sheet(0)  # get first sheet
         rows_count = len(data[list(data.keys())[0]])
         for key in data.keys():
+            coll_number = self._symnum(key)
+            local_style = self._get_style(key)
             for row_number in range(rows_count):
-                coll_number = self._symnum(key)
                 cell_value = str(data[key][row_number])
-                ws.write(row_number + 1, coll_number, cell_value)
-        wb.save('../data.xls')
+                ws.write(row_number + 1, coll_number, cell_value, style=local_style)
+        self._wb.save(self._output_filename)
 
 
 if __name__ == '__main__':
