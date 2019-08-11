@@ -1,0 +1,5 @@
+xlwt
+xlutils
+xlrd
+transliterate
+requests
