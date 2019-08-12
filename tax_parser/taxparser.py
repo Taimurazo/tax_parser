@@ -1,3 +1,4 @@
+from pprint import pprint
 from time import sleep
 import logging
 import requests
@@ -6,11 +7,14 @@ from transliterate import translit, detect_language
 from tax_parser.file_reader import XlsFileReader
 
 
-
 # todo
 #  add test for wait condition.
-#
+#  add input data preprocessor. +
 
+# отказался от обработки строк сразу после чтения данных из файла. Буду их обрабатывать непосредственно перед поиском.
+# Таким образом я избавился от лишнего обхода по данным.
+
+# Перед каждой идеей спрашивай себя " А какие в ней недостатки?".
 def custom_translit(text):
     """
     Транслитерация текса на русский язык. Слово <<Company>> переводит как <<Компания>>.
@@ -40,7 +44,19 @@ class TaxParser:
 
     def _get_input_comany_list(self):
         data = self._excel_file.read_file()
-        self._input_companies = data['B']
+        self._input_companies = data
+
+    @classmethod
+    def string_preprocessor(cls, string):
+        result = ''
+        symbols_map = {'«': '"', '»': '"'}
+        for symbol in symbols_map.keys():
+            string = string.replace(symbol, symbols_map[symbol])
+
+        for word in string.split():
+            result += word + ' '
+        result = result[:len(result) - 1]  # remove last space.
+        return result
 
     def _get_remote_data(self, comp_name):
         lines_per_page = 20
@@ -85,20 +101,63 @@ class TaxParser:
             sleep(1)
         return result_list
 
-    # a - adress
-    # i - inn
-    # n - name
+    def _compare_names(self, first_name, second_name):
+        return first_name == second_name
 
-    def test_request(self):
-        print(self._get_remote_data('star'))
+    def _compare_adresses(self, first_adress, second_adress):
+        return True
+
+    def _find_matches(self, name, adress, remote_data):
+        statuses = {
+            'accurate': 'точное совпадение',
+            'inaccurate': 'неточное совпадение',
+            'not_found': 'не найдено'
+        }
+
+        match_list = []
+        for element in remote_data:
+            if self._compare_names(element['n'], name) and self._compare_adresses(adress, element['a']):
+                match_list.append(element)
+
+        result = {
+            'status': statuses['accurate'],
+            'result': match_list,
+        }
+
+        if len(match_list) > 1:  # if math not accurate changing status.
+            result['status'] = statuses['inaccurate']
+        elif len(match_list) == 0:
+            result['status'] = statuses['not_found']
+        return result
 
     def parse(self):
         for comp_name, comp_adress in self._input_companies:
-            remote_data = self._get_remote_data(comp_name, comp_adress)
-            found_data = self._find_matches(comp_name, comp_adress)
-            self._add_to_result(found_data)
+            comp_name = self._string_preprocessor(comp_name)  # remove excess quotes and spaces
+            remote_data = self._get_remote_data(comp_name)  # data from web site
+            found_data = self._find_matches(comp_name, comp_adress, remote_data)
+            # self._add_to_result(found_data)
+
+        # find the place of matched data after matching operation !!!
+
         self.save_data()
+
+    def test_data_match(self):
+        name = 'АО  «ЦТК»'
+        name = self.string_preprocessor(name)
+        print(name)
+        adress = '457040 ЧЕЛЯБИНСКАЯ ОБЛАСТЬ ГОРОД ЮЖНОУРАЛЬСК УЛИЦА СТАНИЧНАЯ 58'
+        remote_data = self._get_remote_data(name)
+        res = self._find_matches(name, adress, remote_data)
+        print(res)
+
+
+def test_data_preprocessor():
+    tp = TaxParser()
+    name = 'АО  «ЦТК»'
+    print('old:  %s ' % name)
+    print('new:  %s ' % tp.string_preprocessor(name))
 
 
 if __name__ == '__main__':
-    TaxParser().test_request()
+    # test_data_preprocessor()
+    TaxParser().test_data_match()

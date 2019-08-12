@@ -7,3 +7,6 @@ def test_output_file_compare():
     data = f.read_file()
     f.write_file(data)
     assert filecmp.cmp('test_output.xls', 'control_input.xls'), 'files not equal'
+
+
+
