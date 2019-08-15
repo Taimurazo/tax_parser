@@ -10,29 +10,19 @@ from tax_parser.file_reader import XlsFileReader
 # todo
 #  add test for wait condition.
 #  add input data preprocessor. +
+#  add transliteration
+#  add adress compartion
+#  add file saving
+
 
 # отказался от обработки строк сразу после чтения данных из файла. Буду их обрабатывать непосредственно перед поиском.
 # Таким образом я избавился от лишнего обхода по данным.
 
 # Перед каждой идеей спрашивай себя " А какие в ней недостатки?".
-def custom_translit(text):
-    """
-    Транслитерация текса на русский язык. Слово <<Company>> переводит как <<Компания>>.
-    :param text: переменная с исходным текстом для транслитерации.
-    :return: транслированный текст.
-    """
-    result = ''
-    words = text.split()
-    for word in words:
-        if detect_language(word) != 'ru':
-            if word.upper() == 'COMPANY':
-                word = 'Компания'
-            else:
-                word = translit(word, 'ru')
 
-        result += word + ' '
-    result = result[:len(result) - 1]  # slice last space
-    return result
+# Обрабатывай случаи когда приходит пустой ответ!!!!!
+
+#  !!! Рассказать о не правильной транслитерации c = > к
 
 
 class TaxParser:
@@ -56,6 +46,23 @@ class TaxParser:
         for word in string.split():
             result += word + ' '
         result = result[:len(result) - 1]  # remove last space.
+        return result
+
+    @classmethod
+    def custom_translit(cls, text):
+        """
+        Транслитерация текса на русский язык. Слово <<Company>> переводит как <<Компания>>.
+        :param text: переменная с исходным текстом для транслитерации.
+        :return: транслированный текст.
+        """
+        result = ''
+        words = text.split()
+        for word in words:
+            word = word.upper().replace('COMPANY', 'КОМПАНИЯ')
+            if detect_language(word) != 'ru':
+                word = translit(word, 'ru')
+            result += word + ' '
+        result = result[:len(result) - 1]  # slice last space
         return result
 
     def _get_remote_data(self, comp_name):
@@ -90,8 +97,12 @@ class TaxParser:
 
         response = send_request(comp_name, 1)
         response_data = response.json()['rows']
-        total = int(response_data[0]['tot'])  # get total elements count from first element
-        pages = ceil(total / lines_per_page)
+
+        pages = 0
+
+        if len(response_data) != 0:
+            total = int(response_data[0]['tot'])  # get total elements count from first element
+            pages = ceil(total / lines_per_page)
 
         for page in range(pages):  # all pages, except first page
             page += 1
@@ -108,6 +119,8 @@ class TaxParser:
         return True
 
     def _find_matches(self, name, adress, remote_data):
+        name = name.upper()
+
         statuses = {
             'accurate': 'точное совпадение',
             'inaccurate': 'неточное совпадение',
@@ -131,24 +144,33 @@ class TaxParser:
         return result
 
     def parse(self):
-        for comp_name, comp_adress in self._input_companies:
-            comp_name = self._string_preprocessor(comp_name)  # remove excess quotes and spaces
+        for i in range(len(self._input_companies['A'])):
+            comp_name = self._input_companies['A'][i]
+            comp_adress = self._input_companies['B'][i]
+            comp_name = self.string_preprocessor(comp_name)  # remove excess quotes and spaces
             remote_data = self._get_remote_data(comp_name)  # data from web site
+
+            comp_name = TaxParser.custom_translit(comp_name)
             found_data = self._find_matches(comp_name, comp_adress, remote_data)
+            print('====================================== NAME %s' % comp_name)
+            print('STATUS: %s' % found_data['status'])
+            for comp in found_data['result']:
+                pprint(comp['n'])
+            sleep(1)  # avoiding site blocking
             # self._add_to_result(found_data)
 
         # find the place of matched data after matching operation !!!
 
-        self.save_data()
+        # self.save_data()
 
-    def test_data_match(self):
-        name = 'АО  «ЦТК»'
-        name = self.string_preprocessor(name)
-        print(name)
-        adress = '457040 ЧЕЛЯБИНСКАЯ ОБЛАСТЬ ГОРОД ЮЖНОУРАЛЬСК УЛИЦА СТАНИЧНАЯ 58'
-        remote_data = self._get_remote_data(name)
-        res = self._find_matches(name, adress, remote_data)
-        print(res)
+
+def test_data_match():
+    tp = TaxParser()
+    tp.parse()
+    # adress = '457040 ЧЕЛЯБИНСКАЯ ОБЛАСТЬ ГОРОД ЮЖНОУРАЛЬСК УЛИЦА СТАНИЧНАЯ 58'
+    # remote_data = self._get_remote_data(name)
+    # res = self._find_matches(name, adress, remote_data)
+    # print(res)
 
 
 def test_data_preprocessor():
@@ -158,6 +180,10 @@ def test_data_preprocessor():
     print('new:  %s ' % tp.string_preprocessor(name))
 
 
+def test_translit():
+    names = 'АО  «ЦТК»'
+
+
 if __name__ == '__main__':
     # test_data_preprocessor()
-    TaxParser().test_data_match()
+    test_data_match()
