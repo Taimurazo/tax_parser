@@ -71,6 +71,7 @@ class XlsFileReader:
         for key in data.keys():
             coll_number = self._symnum(key)
             local_style = self._get_style(key)
+            local_style.alignment.wrap = 1
             for row_number in range(rows_count):
                 cell_value = str(data[key][row_number])
                 ws.write(row_number + 1, coll_number, cell_value, style=local_style)

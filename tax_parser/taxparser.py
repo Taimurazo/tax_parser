@@ -6,7 +6,6 @@ from math import ceil
 from transliterate import translit, detect_language
 from tax_parser.file_reader import XlsFileReader
 
-
 # todo
 #  add test for wait condition.
 #  add input data preprocessor. +
@@ -25,10 +24,19 @@ from tax_parser.file_reader import XlsFileReader
 #  !!! Рассказать о не правильной транслитерации c = > к
 
 
+# Рассказать о максимальном количестве страниц.
+
+# Рассказать об ограничениях по времени
+
+
+REQUEST_DEALY = 1
+LINES_PER_PAGE = 20
+
+
 class TaxParser:
 
     def __init__(self):
-        self._excel_file = XlsFileReader()
+        self._excel_file = XlsFileReader(input_filename='../data.xls', output_filename='../data_output.xls')
         self._input_companies = []
         self._get_input_comany_list()
 
@@ -55,6 +63,7 @@ class TaxParser:
         :param text: переменная с исходным текстом для транслитерации.
         :return: транслированный текст.
         """
+
         result = ''
         words = text.split()
         for word in words:
@@ -66,12 +75,13 @@ class TaxParser:
         return result
 
     def _get_remote_data(self, comp_name):
-        lines_per_page = 20
         result_list = []
 
         def send_request(name, page):
+
             post_url = 'https://egrul.nalog.ru/'
             get_url = 'https://egrul.nalog.ru/search-result/'
+            result = []
 
             # get request key
             payload = {
@@ -80,36 +90,37 @@ class TaxParser:
                 'nameEq': 'on'
 
             }
-            result = requests.post(url=post_url, data=payload)
+            try:
+                result = requests.post(url=post_url, data=payload)
 
-            # get results
-            request_key = result.json()['t']
+                # get results
+                request_key = result.json()['t']
 
-            response = requests.get(get_url + request_key)
+                response = requests.get(get_url + request_key)
 
-            if response.json().get('status') == 'wait':
-                status = 'wait'
-                while status == 'wait':
-                    sleep(2)
-                    response = requests.get(get_url + request_key)
+                if response.json().get('status') == 'wait':
+                    status = 'wait'
+                    while status == 'wait':
+                        sleep(REQUEST_DEALY)
+                        response = requests.get(get_url + request_key)
+                else:
+                    result = response.json().get('rows')
+            except Exception as e:
+                pass
+            return result
 
-            return response
-
-        response = send_request(comp_name, 1)
-        response_data = response.json()['rows']
-
-        pages = 0
+        response_data = send_request(comp_name, 1)
 
         if len(response_data) != 0:
             total = int(response_data[0]['tot'])  # get total elements count from first element
-            pages = ceil(total / lines_per_page)
+            pages = ceil(total / LINES_PER_PAGE)
+            result_list += response_data  # add first page
+            for page in range(2, pages + 1):  # all pages, except first page
+                response_data = send_request(comp_name, page)
+                if len(response_data) != 0:
+                    result_list += response_data
+                    sleep(REQUEST_DEALY)
 
-        for page in range(pages):  # all pages, except first page
-            page += 1
-            response = send_request(comp_name, page)
-            response_data = response.json()['rows']
-            result_list += response_data
-            sleep(1)
         return result_list
 
     def _compare_names(self, first_name, second_name):
@@ -127,21 +138,35 @@ class TaxParser:
             'not_found': 'не найдено'
         }
 
-        match_list = []
-        for element in remote_data:
-            if self._compare_names(element['n'], name) and self._compare_adresses(adress, element['a']):
-                match_list.append(element)
-
         result = {
             'status': statuses['accurate'],
-            'result': match_list,
+            'result': [],
         }
 
-        if len(match_list) > 1:  # if math not accurate changing status.
-            result['status'] = statuses['inaccurate']
-        elif len(match_list) == 0:
+        if len(remote_data) == 0:
             result['status'] = statuses['not_found']
+            result['result'] = []
+            return result
+
+        for element in remote_data:
+            if self._compare_names(element['n'], name) and self._compare_adresses(adress, element['a']):
+                result['status'] = statuses['accurate']
+                result['result'] = [element, ]
+                return result
+            else:
+                result['result'].append(element)
+
+        result['status'] = statuses['inaccurate']
         return result
+
+    def _add_to_result(self, index, found_data):
+        self._input_companies['D'][index] = found_data['status']  # Результат
+        for data in found_data['result']:
+            self._input_companies['C'][index] += data['i'] + '\n'  # INN
+            self._input_companies['B'][index] += data['n'] + '\n'  # NAMES
+
+    def save_data(self):
+        self._excel_file.write_file(self._input_companies)
 
     def parse(self):
         for i in range(len(self._input_companies['A'])):
@@ -152,25 +177,15 @@ class TaxParser:
 
             comp_name = TaxParser.custom_translit(comp_name)
             found_data = self._find_matches(comp_name, comp_adress, remote_data)
-            print('====================================== NAME %s' % comp_name)
-            print('STATUS: %s' % found_data['status'])
-            for comp in found_data['result']:
-                pprint(comp['n'])
-            sleep(1)  # avoiding site blocking
-            # self._add_to_result(found_data)
+            sleep(REQUEST_DEALY)  # avoiding site blocking
 
-        # find the place of matched data after matching operation !!!
-
-        # self.save_data()
+            self._add_to_result(i, found_data)
+        self.save_data()
 
 
 def test_data_match():
     tp = TaxParser()
     tp.parse()
-    # adress = '457040 ЧЕЛЯБИНСКАЯ ОБЛАСТЬ ГОРОД ЮЖНОУРАЛЬСК УЛИЦА СТАНИЧНАЯ 58'
-    # remote_data = self._get_remote_data(name)
-    # res = self._find_matches(name, adress, remote_data)
-    # print(res)
 
 
 def test_data_preprocessor():
@@ -180,10 +195,23 @@ def test_data_preprocessor():
     print('new:  %s ' % tp.string_preprocessor(name))
 
 
-def test_translit():
-    names = 'АО  «ЦТК»'
+def test_multiple_page():
+    # name = 'ООО "А-Принт"'
+    # name = 'Береза'
+    name = 'star'
+    tp = TaxParser()
+    data = tp._get_remote_data(name)
+    print('Elements in response: ', len(data))
+
+
+def test_saving_data():
+    tp = TaxParser()
+    tp.parse()
 
 
 if __name__ == '__main__':
     # test_data_preprocessor()
-    test_data_match()
+    # test_data_match()
+    # test_multiple_page()
+    test_saving_data()
+
