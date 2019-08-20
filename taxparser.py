@@ -4,7 +4,7 @@ import logging
 import requests
 from math import ceil
 from transliterate import translit, detect_language
-from tax_parser.file_reader import XlsFileReader
+from file_reader import XlsFileReader
 
 # todo
 #  add test for wait condition.
@@ -29,14 +29,17 @@ from tax_parser.file_reader import XlsFileReader
 # Рассказать об ограничениях по времени
 
 
-REQUEST_DEALY = 1
+REQUEST_DEALY = 2
 LINES_PER_PAGE = 20
 
 
 class TaxParser:
 
     def __init__(self):
-        self._excel_file = XlsFileReader(input_filename='../data.xls', output_filename='../data_output.xls')
+        self._excel_file = XlsFileReader(input_filename='data.xls', output_filename='data_output.xls')
+        self._excel_file_part = XlsFileReader(input_filename='data.xls', output_filename='data_output_part.xls')
+        self._excel_file_part.read_file()
+
         self._input_companies = []
         self._get_input_comany_list()
 
@@ -92,11 +95,11 @@ class TaxParser:
             }
             try:
                 result = requests.post(url=post_url, data=payload)
-
                 # get results
                 request_key = result.json()['t']
 
                 response = requests.get(get_url + request_key)
+                # print("second request " , response.status_code)
 
                 if response.json().get('status') == 'wait':
                     status = 'wait'
@@ -111,17 +114,7 @@ class TaxParser:
 
         response_data = send_request(comp_name, 1)
 
-        if len(response_data) != 0:
-            total = int(response_data[0]['tot'])  # get total elements count from first element
-            pages = ceil(total / LINES_PER_PAGE)
-            result_list += response_data  # add first page
-            for page in range(2, pages + 1):  # all pages, except first page
-                response_data = send_request(comp_name, page)
-                if len(response_data) != 0:
-                    result_list += response_data
-                    sleep(REQUEST_DEALY)
-
-        return result_list
+        return response_data
 
     def _compare_names(self, first_name, second_name):
         return first_name == second_name
@@ -135,7 +128,8 @@ class TaxParser:
         statuses = {
             'accurate': 'точное совпадение',
             'inaccurate': 'неточное совпадение',
-            'not_found': 'не найдено'
+            'not_found': 'не найдено',
+            'gt_five': 'более пяти элементов'
         }
 
         result = {
@@ -156,14 +150,23 @@ class TaxParser:
             else:
                 result['result'].append(element)
 
+        if len(result['result']) > 5:
+            result['result'] = result['result'][:5]
+            result['status'] = statuses['gt_five']
+            return result
+
         result['status'] = statuses['inaccurate']
         return result
 
     def _add_to_result(self, index, found_data):
         self._input_companies['D'][index] = found_data['status']  # Результат
+        self._excel_file_part.write_part(index + 1, 'D', found_data['status'])
+
         for data in found_data['result']:
-            self._input_companies['C'][index] += data['i'] + '\n'  # INN
-            self._input_companies['B'][index] += data['n'] + '\n'  # NAMES
+            self._input_companies['C'][index] += data.get('i', 'значение отсутствует') + '\n'  # INN
+            self._input_companies['B'][index] += data.get('n', 'значение отсутствует') + '\n'  # NAMES
+        self._excel_file_part.write_part(index + 1, 'C', self._input_companies['C'][index])
+        self._excel_file_part.write_part(index + 1, 'B', self._input_companies['B'][index])
 
     def save_data(self):
         self._excel_file.write_file(self._input_companies)
@@ -173,45 +176,23 @@ class TaxParser:
             comp_name = self._input_companies['A'][i]
             comp_adress = self._input_companies['B'][i]
             comp_name = self.string_preprocessor(comp_name)  # remove excess quotes and spaces
-            remote_data = self._get_remote_data(comp_name)  # data from web site
-
-            comp_name = TaxParser.custom_translit(comp_name)
-            found_data = self._find_matches(comp_name, comp_adress, remote_data)
-            sleep(REQUEST_DEALY)  # avoiding site blocking
-
-            self._add_to_result(i, found_data)
+            if comp_name != '':
+                print("=========== #%d %s " % (i, comp_name))
+                print("   - Получение данных ...")
+                remote_data = self._get_remote_data(comp_name)  # data from web site
+                comp_name = TaxParser.custom_translit(comp_name)
+                print("   - Сравнение данных ...")
+                found_data = self._find_matches(comp_name, comp_adress, remote_data)
+                sleep(REQUEST_DEALY)  # avoiding site blocking
+                self._add_to_result(i, found_data)
+            else:
+                print('Пустое название организации.')
+        print("Сохранение всех данных в файл ...")
         self.save_data()
+        print("Конец. Пара - пара - пам!")
 
-
-def test_data_match():
-    tp = TaxParser()
-    tp.parse()
-
-
-def test_data_preprocessor():
-    tp = TaxParser()
-    name = 'АО  «ЦТК»'
-    print('old:  %s ' % name)
-    print('new:  %s ' % tp.string_preprocessor(name))
-
-
-def test_multiple_page():
-    # name = 'ООО "А-Принт"'
-    # name = 'Береза'
-    name = 'star'
-    tp = TaxParser()
-    data = tp._get_remote_data(name)
-    print('Elements in response: ', len(data))
-
-
-def test_saving_data():
-    tp = TaxParser()
-    tp.parse()
 
 
 if __name__ == '__main__':
-    # test_data_preprocessor()
-    # test_data_match()
-    # test_multiple_page()
-    test_saving_data()
-
+    tp = TaxParser()
+    tp.parse()

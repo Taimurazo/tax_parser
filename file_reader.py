@@ -15,6 +15,8 @@ class XlsFileReader:
         self._input_filename = input_filename
         self._output_filename = output_filename
         self._styles = None
+        self._part_file = None
+        self._part_file_ws = None
 
     def _numsym(self, number):
         alphabet = "ABCDEFGHIJKLMNOP"
@@ -77,8 +79,24 @@ class XlsFileReader:
                 ws.write(row_number + 1, coll_number, cell_value, style=local_style)
         self._wb.save(self._output_filename)
 
+    def write_part(self, row_number, coll_key, cell_value):
+        if not self._part_file:
+            self._part_file = copy(self._rb)
+            self._part_file_ws = self._part_file.get_sheet(0)  # get first sheet
+        coll_number = self._symnum(coll_key)
+        local_style = self._get_style(coll_key)
+        local_style.alignment.wrap = 1
+        cell_value = str(cell_value)
+
+        self._part_file_ws.write(row_number, coll_number, cell_value, style=local_style)
+        self._part_file.save(self._output_filename)
+
 
 if __name__ == '__main__':
-    f = XlsFileReader('../data.xls')
+    f = XlsFileReader(input_filename='data.xls', output_filename='part_data.xls')
     data = f.read_file()
-    f.write_file(data)
+    f.write_part(row_number=1, coll_key='B', cell_value='qdqwdwqd')
+    f.write_part(row_number=1, coll_key='C', cell_value='23')
+    f.write_part(row_number=1, coll_key='D', cell_value='3')
+    f.write_part(row_number=1, coll_key='E', cell_value='4')
+    f.write_part(row_number=1, coll_key='F', cell_value='5')
